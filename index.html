@@ -1,0 +1,116 @@
+<html>
+<head>
+  <title>Upcoming meetings</title>
+  <script src="https://alcdn.msauth.net/browser/2.28.3/js/msal-browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client/lib/graph-js-sdk.js"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@microsoft/microsoft-graph-client/lib/graph-client-msalBrowserAuthProvider.js"></script>
+  <script src="./env.js"></script>
+  <style>
+    dt {
+      font-weight: bold;
+    }
+
+    dd {
+      margin: 0 0 1em 1em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Upcoming meetings</h1>
+  <div id="auth"></div>
+  <div id="upcomingMeetings"></div>
+  <script>
+    (() => {
+      const scopes = ['Calendars.Read'];
+      const msalConfig = {
+        auth: {
+          clientId: appId
+        }
+      };
+      const msalClient = new msal.PublicClientApplication(msalConfig);
+
+      function render() {
+        msalClient
+          .handleRedirectPromise()
+          .then(response => {
+            const accounts = msalClient.getAllAccounts();
+
+            if (accounts.length === 0) {
+              document.querySelector('#auth').innerHTML = '<button>Login</button>';
+              document.querySelector('#auth button').addEventListener('click', login);
+              document.querySelector('#upcomingMeetings').innerHTML = '';
+            }
+            else {
+              document.querySelector('#auth').innerHTML = '<button>Logout</button>';
+              document.querySelector('#auth button').addEventListener('click', logout);
+              const graphClient = getGraphClient(accounts[0]);
+              loadUpcomingMeetings(graphClient);
+            }
+          });
+      }
+
+      function login(e) {
+        e.preventDefault();
+        msalClient.loginRedirect({
+          scopes
+        });
+      }
+
+      function logout(e) {
+        e.preventDefault();
+        msalClient.logoutRedirect();
+      }
+
+      function getGraphClient(account) {
+        const authProvider = new MSGraphAuthCodeMSALBrowserAuthProvider.AuthCodeMSALBrowserAuthenticationProvider(msalClient, {
+          account,
+          scopes,
+          interactionType: msal.InteractionType.Redirect,
+        });
+
+        return MicrosoftGraph.Client.initWithMiddleware({ authProvider });
+      }
+
+      function getTimeString(dateFromGraph) {
+        const date = new Date(dateFromGraph + 'Z');
+        const minutes = date.getMinutes();
+        return `${date.getHours()}:${minutes < 10 ? '0' : ''}${minutes}`;
+      }
+
+      function loadUpcomingMeetings(graphClient) {
+        // configure Microsoft Graph query to retrieve upcoming meetings for today
+        const now = new Date();
+        const midnight = new Date();
+        midnight.setDate(midnight.getDate() + 1);
+        midnight.setHours(0);
+        midnight.setMinutes(0);
+        midnight.setSeconds(0);
+        midnight.setMilliseconds(0);
+
+        graphClient
+          .api(`/me/calendarview?startdatetime=${now.toISOString()}&enddatetime=${midnight.toISOString()}&$orderby=start/dateTime`)
+          .get()
+          .then(res => {
+            if (res.value.length === 0) {
+              document.querySelector('#upcomingMeetings').innerHTML = 'No more meetings for today';
+            }
+            else {
+              const meetingsHtml = res.value.map(meeting => {
+                return `<dt>
+                  ${getTimeString(meeting.start.dateTime)}-${getTimeString(meeting.end.dateTime)} ${meeting.subject}
+                </dt>
+                <dd>
+                  ${meeting.location.displayName} with ${meeting.attendees.map(attendee => attendee.emailAddress.name).join(', ')}
+                </dd>`;
+              });
+              document.querySelector('#upcomingMeetings').innerHTML = `<dl>${meetingsHtml.join('')}</dl>`;
+            }
+          });
+      }
+
+      render();
+    })();
+  </script>
+</body>
+</html>
